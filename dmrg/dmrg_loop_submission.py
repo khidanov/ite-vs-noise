@@ -7,8 +7,8 @@ with open(job_file, "w") as fh:
     fh.writelines("#!/bin/bash\n")
     fh.writelines("#SBATCH -t 24:00:00\n")
     fh.writelines("#SBATCH --nodes=1\n")
-    fh.writelines("#SBATCH --ntasks-per-node=1\n") #half of available CPUs for a given partition; CPU allocation is x2 of this number for swift, biocrunch, x4 for legion, x1 for speedy
-    fh.writelines("#SBATCH --cpus-per-task="+str(CPUs)+"\n")  #half of available CPUs for a given partition; CPU allocation is x2 of this number for swift, biocrunch, x4 for legion, x1 for speedy
+    fh.writelines("#SBATCH --ntasks-per-node=1\n")
+    fh.writelines("#SBATCH --cpus-per-task="+str(CPUs)+"\n")
     fh.writelines("#SBATCH --mem-per-cpu=4G\n")
     fh.writelines("#SBATCH --partition=dense\n")
     fh.writelines("#SBATCH --hint=compute_bound\n")

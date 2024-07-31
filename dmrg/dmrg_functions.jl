@@ -1,8 +1,27 @@
 
 
-"function to compute the ground state of a spin ladder Hamiltonian and associated Binder cumulant corresponding to the mixed steady state of the noisy ITE"
+"""
+Function to compute the ground state of a spin ladder Hamiltonian and
+associated Binder cumulant corresponding to the mixed steady state of the noisy
+ITE
+"""
 
-function dmrg_binder(N,interaction_sign,g,lamX,lamY,lamZ,lamXX,lamYY,lamZZ,lamAD,nsweeps,maxdim,cutoff,psi0_bonddim)
+function dmrg_binder(
+    N,
+    interaction_sign,
+    g,
+    lamX,
+    lamY,
+    lamZ,
+    lamXX,
+    lamYY,
+    lamZZ,
+    lamAD,
+    nsweeps,
+    maxdim,
+    cutoff,
+    psi0_bonddim
+)
     """
         N -- total number of sites on the ladder
         interaction_sign -- interaction along the legs of the ladder, FM or AFM
@@ -83,18 +102,31 @@ function dmrg_binder(N,interaction_sign,g,lamX,lamY,lamZ,lamXX,lamYY,lamZZ,lamAD
     end
     obs_t = MPO(os_obs_t,sites)
 
-    "DMRG routine computing the ground state of the spin ladder. The routine is performed multiple times with a random initial state until the convergence criteria are met or the maximum number of iterations is reached.
-    This is needed because sometimes DMRG can converge to a state within the ground state manifold that has a very small overlap with the |1>> state. The small overlap can lead to numerical errors."
+    """
+    DMRG routine computing the ground state of the spin ladder.
+    The routine is performed multiple times with a random initial state until
+    the convergence criteria are met or the maximum number of iterations is
+    reached.
+    This is needed because sometimes DMRG can converge to a state within the
+    ground state manifold that has a very small overlap with the |1>> state.
+    The small overlap can lead to numerical errors.
+    """
     for i in 1:100
         psi0 = randomMPS(sites,psi0_bonddim)
         if lamAD == 0.0
             energy_l, psi_l = dmrg(H,psi0; nsweeps, maxdim, cutoff, outputlevel=0, ishermitian=true)
         else
-            energy_l, psi_l = dmrg(H,psi0; nsweeps, maxdim, cutoff, outputlevel=0, ishermitian=false)    # the Hamiltonian is non-Hermitian if the AD noise is present
+            "the Hamiltonian is non-Hermitian if the AD noise is present"
+            energy_l, psi_l = dmrg(H,psi0; nsweeps, maxdim, cutoff, outputlevel=0, ishermitian=false)
         end
         global energy = energy_l
         global psi = psi_l
-        "The first criterion ensures that the overlap between the ground state and the |1>> state is nonzero, i.e. that DMRG converged to the correct symmetry-broken state. The second criterion is added for the case of a disordered ground state"
+        """
+        The first criterion ensures that the overlap between the ground state
+        and the |1>> state is nonzero, i.e. that DMRG converged to the correct
+        symmetry-broken state.
+        The second criterion is added for the case of a disordered ground state.
+            """
         if real(inner(psi_l',obs_t,psi_l)) > 0 || abs(real(inner(psi_l',obs_t,psi_l))) < 0.001
             break
         end
@@ -110,7 +142,10 @@ function dmrg_binder(N,interaction_sign,g,lamX,lamY,lamZ,lamXX,lamYY,lamZZ,lamAD
         id_efd_mps[2*i]=Bell_MPS[2]
     end
 
-    "calculating the mixed-state expectation value of <m^4> and <m^2> using the doubled space formalism"
+    """
+    calculating the mixed-state expectation value of <m^4> and <m^2> using the
+    doubled space formalism
+    """
     avg4 = inner(mag2,id_efd_mps,mag2,psi)/inner(id_efd_mps,psi)
     avg2 = inner(id_efd_mps',mag2,psi)/inner(id_efd_mps,psi)
 
@@ -121,12 +156,38 @@ end
 
 
 
-"Function to compute the ground states of a spin ladder Hamiltonian with and without noise-induced couplings, and evaluate the overlap beetween the two ground states.
-This overlap corresponds to the fidelity between the steady states of the noiseless and the noisy ITE.
-For the smaller system sizes that we've checked (N=50,100,200) and despite the symeetry breaking fields added at the ends of the ladder, the DMRG still sometimes picks ground states for H0 and H from different SB sectors, which results in a very small fidelity.
-In this case, the DMRG calculation is needed to be performed again with a different initial state. This issue seems to disappear for larger system sizes (N=400,800)"
+"""
+Function to compute the ground states of a spin ladder Hamiltonian with and
+without noise-induced couplings, and evaluate the overlap beetween the two
+ground states.
+This overlap corresponds to the fidelity between the steady states of the
+noiseless and the noisy ITE.
+For the smaller system sizes that we've checked (N=50,100,200) and despite the
+symeetry breaking fields added at the ends of the ladder, the DMRG still
+sometimes picks ground states for H0 and H from different SB sectors, which
+results in a very small fidelity.
+In this case, the DMRG calculation is needed to be performed again with a
+different initial state. This issue seems to disappear for larger system
+sizes (N=400,800)
+"""
 
-function dmrg_fidelity(N,interaction_sign,g,lamX,lamY,lamZ,lamXX,lamYY,lamZZ,lamAD,lamSBends,nsweeps,maxdim,cutoff,psi0_bonddim)
+function dmrg_fidelity(
+    N,
+    interaction_sign,
+    g,
+    lamX,
+    lamY,
+    lamZ,
+    lamXX,
+    lamYY,
+    lamZZ,
+    lamAD,
+    lamSBends,
+    nsweeps,
+    maxdim,
+    cutoff,
+    psi0_bonddim
+)
     """
         N -- total number of sites on the ladder
         interaction_sign -- interaction along the legs of the ladder, FM or AFM
@@ -138,7 +199,8 @@ function dmrg_fidelity(N,interaction_sign,g,lamX,lamY,lamZ,lamXX,lamYY,lamZZ,lam
         lamYY -- YYYY-type plaquette interleg coupling (induced by YY noise in the ITE)
         lamZZ -- ZZZZ-type plaquette interleg coupling (induced by ZZ noise in the ITE)
         lamAD -- AD noise induced interleg coupling
-        lamSBends -- symmetry-breaking field added at the ends of the spin ladder to ensure that the DMRG picks a consistent summetry-broken grounds state
+        lamSBends -- symmetry-breaking field added at the ends of the spin ladder
+        to ensure that the DMRG picks a consistent summetry-broken grounds state
         nsweeps -- number of DMRG sweeps
         maxdim -- maximum DMRG bod dimension
         cutoff -- DMRG cutoff
@@ -174,7 +236,7 @@ function dmrg_fidelity(N,interaction_sign,g,lamX,lamY,lamZ,lamXX,lamYY,lamZZ,lam
     os += -lamSBends,"Z",N-1   # adding symmetry-breaking field
     os += -lamSBends,"Z",N   # adding symmetry-breaking field
 
-    H0 = MPO(os,sites)    # creating MPO for the Hamiltonian without the noise-induced coupling
+    H0 = MPO(os,sites)  # creating MPO for the Hamiltonian without the noise-induced coupling
 
     for j=1:2:N-1   # interleg coupling
         os += -lamX,"X",j,"X",j+1
@@ -204,35 +266,61 @@ function dmrg_fidelity(N,interaction_sign,g,lamX,lamY,lamZ,lamXX,lamYY,lamZZ,lam
     end
     obs_t = MPO(os_obs_t,sites)
 
-    "DMRG routine computing the ground state of H0. The routine is performed multiple times with a random initial state until the convergence criteria are met or the maximum number of iterations is reached.
-    This is needed because sometimes DMRG can converge to a state within the ground state manifold that has a very small overlap with the |1>> state. The small overlap can lead to numerical errors."
+    """
+    DMRG routine computing the ground state of H0.
+    The routine is performed multiple times with a random initial state until
+    the convergence criteria are met or the maximum number of iterations is
+    reached.
+    This is needed because sometimes DMRG can converge to a state within the
+    ground state manifold that has a very small overlap with the |1>> state.
+    The small overlap can lead to numerical errors.
+    """
     for i in 1:100
         psi0 = randomMPS(sites,psi0_bonddim)
         if lamAD == 0.0
             energy_l, psi_l = dmrg(H0,psi0; nsweeps, maxdim, cutoff, outputlevel=0, ishermitian=true)
         else
-            energy_l, psi_l = dmrg(H0,psi0; nsweeps, maxdim, cutoff, outputlevel=0, ishermitian=false)    # the Hamiltonian is non-Hermitian if the AD noise is present
+            "the Hamiltonian is non-Hermitian if the AD noise is present"
+            energy_l, psi_l = dmrg(H0,psi0; nsweeps, maxdim, cutoff, outputlevel=0, ishermitian=false)
         end
         global energy_gs = energy_l
         global psi_gs = psi_l
-        "The first criterion ensures that the overlap between the ground state and the |1>> state is nonzero, i.e. that DMRG converged to the correct symmetry-broken state. The second criterion is added for the case of a disordered ground state"
+        """
+        The first criterion ensures that the overlap between the ground
+        state and the |1>> state is nonzero, i.e. that DMRG converged to the
+        correct symmetry-broken state.
+        The second criterion is added for the case of a disordered ground state
+        """
         if real(inner(psi_l',obs_t,psi_l)) > 0 || abs(real(inner(psi_l',obs_t,psi_l))) < 0.001
             break
         end
     end
 
-    "DMRG routine computing the ground state of H. The routine is performed multiple times with a random initial state until the convergence criteria are met or the maximum number of iterations is reached.
-    This is needed because sometimes DMRG can converge to a state within the ground state manifold that has a very small overlap with the |1>> state. The small overlap can lead to numerical errors."
+    """
+    DMRG routine computing the ground state of H.
+    The routine is performed multiple times with a random initial state until
+    the convergence criteria are met or the maximum number of iterations is
+    reached.
+    This is needed because sometimes DMRG can converge to a state within the
+    ground state manifold that has a very small overlap with the |1>> state.
+    The small overlap can lead to numerical errors.
+    """
     for i in 1:100
         psi0 = randomMPS(sites,psi0_bonddim)
         if lamAD == 0.0
             energy_l, psi_l = dmrg(H,psi0; nsweeps, maxdim, cutoff, outputlevel=0, ishermitian=true)
         else
-            energy_l, psi_l = dmrg(H,psi0; nsweeps, maxdim, cutoff, outputlevel=0, ishermitian=false)    # the Hamiltonian is non-Hermitian if the AD noise is present
+            "the Hamiltonian is non-Hermitian if the AD noise is present"
+            energy_l, psi_l = dmrg(H,psi0; nsweeps, maxdim, cutoff, outputlevel=0, ishermitian=false)
         end
         global energy = energy_l
         global psi = psi_l
-        "The first criterion ensures that the overlap between the ground state and the |1>> state is nonzero, i.e. that DMRG converged to the correct symmetry-broken state. The second criterion is added for the case of a disordered ground state"
+        """
+        The first criterion ensures that the overlap between the ground state
+        and the |1>> state is nonzero, i.e. that DMRG converged to the correct
+        symmetry-broken state.
+        The second criterion is added for the case of a disordered ground state.
+        """
         if real(inner(psi_l',obs_t,psi_l)) > 0 || abs(real(inner(psi_l',obs_t,psi_l))) < 0.001
             break
         end
