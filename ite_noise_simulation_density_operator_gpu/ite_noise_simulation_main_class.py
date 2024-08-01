@@ -168,63 +168,41 @@ def ZZ_func_cp(L, Z):
 
 
 class ITE_noise_cp:
-
-
     """
-    Class for performing VarQITE and ITE simulations for the TFIM using Qiskit.
-    VarQITE simulation is performed using method qiskit_varqite.
-    ITE simulation is performed using method qiskit_ite.
+    Class for performing GPU-assisted direct density matrix simulation of a
+    noisy Trotterized ITE for 1D TFIM.
+    The main method performing the simulation is ite_density_matrix.
+    The Binder cumulant obtained through the simulations is then used to
+    detemine phase transitions in the noisy model.
 
     Attributes
     ----------
-    num_qubits : int
-        Number of qubits in the simulated system.
-    H : "SparsePauliOp"
-        TFIM Hamiltonain of the system in the Qiskit "SparsePauliOp" format.
-    aux_ops : List["SparsePauliOp"]
-        List of auxilary operators in the Qiskit "SparsePauliOp" format.
-        The expectation values of the auxilary operators are computed
-        throughout the VarQITE/ITE simulations.
-        H is included as one of the auxilary operators.
-    ansatz : "EfficientSU2"
-        Parameterized ansatz circuit.
-        Here ansatz circuit is given in the Qiskit "EfficientSU2" format.
-    init_param_values : dict["ParameterVectorElement", float]
-        Initial parameter values for the parameterized ansatz circuit.
-        Each key in the dictionary corresponds to an indiviudal parameter
-        (angle) and is the Qiskit "ParameterVectorElement" format.
-    """
-
-
-
-
-
-
-    """
-    dtau is imaginary Trotter step size
-    g is transverse field strength assuming Ising coupling J=1
+    L : int
+        Number of sites.
+    Id : cpx.scipy.sparse.csr_matrix
+        Identity matrix for the given Hibert space in the sparse CSR format.
+    rho0 : cpx.scipy.sparse.csr_matrix
+        Initial state.
     """
     def __init__(self, L = 10):
         self.L = L
-
         self.Id = cpx.scipy.sparse.identity(
             2**self.L, dtype='float32', format='csr'
         )
-
         self.X = X_func_cp(self.L)
         self.Z = Z_func_cp(self.L)
         self.Y = [1j * self.X[i].dot( self.Z[i]) for i in range(self.L)]
         self.ZZ = ZZ_func_cp(self.L,self.Z)
 
         """
-        the magnetization operator and its powers needed to calculate Binder
-        cumulants
+        The magnetization operator and its powers are needed to calculate Binder
+        cumulants.
         """
         self.mag = np.sum( [self.Z[i]/self.L for i in range(self.L)], axis = 0 )
         self.mag2 = (self.mag).dot( self.mag )
         self.mag4 = (self.mag2).dot( self.mag2 )
 
-        'setting the initial state'
+        'Setting the initial state:'
 
         'fully ferromagnetically ordered initial state'
         # col = cp.arange(2**self.L)
@@ -247,16 +225,33 @@ class ITE_noise_cp:
             cp.ones((2**self.L,2**self.L))/2**self.L
         )
 
-    'matrix exponent of a Pauli string'
-    def exp_Pauli(self, coef, P):
+
+    def exp_Pauli(
+        self,
+        coef: float,
+        P
+    ):
+        """
+        Returns matrix exponential of a Pauli string.
+
+        Parameters
+        ----------
+        P : cpx.scipy.sparse.csr_matrix
+            Pauli string
+        coef : float
+            Coefficient under the exponent.
+        """
         return np.cosh(coef) * self.Id - np.sinh(coef) * P
 
-    'one run of the noisy ITE'
+
     def ite_fixed_run(self):
+        """
+        Performs a run of a noisy ITE simulation.
+        """
 
         rho = self.rho0
 
-        U4_array = []
+        U4_list = []
 
         for j in range(self.n_steps):
             'first applying all the ZZs layer by layer'
@@ -351,19 +346,15 @@ class ITE_noise_cp:
             rho = rho/cp.trace((rho).toarray()).item()
 
             'calculation of the expectation values of the observables'
-
             mag4_ev = cp.trace((self.mag4.dot( rho)).toarray()).item()
             mag2_ev = cp.trace((self.mag2.dot( rho)).toarray()).item()
             U4 = 3/2 - 1/2*mag4_ev/mag2_ev**2
 
-            U4_array.append( U4 )
+            U4_list.append( U4 )
 
-        return U4_array
+        return U4_list
 
-    """
-    running the same ite many times with differnet noise realizations
-    and then averaging the results
-    """
+
     def ite_density_matrix(
         self,
         g: float = 0.1,
@@ -402,7 +393,9 @@ class ITE_noise_cp:
 
         Returns
         -------
-
+        U4_data : List[float]
+            List of Binder cumulants computed along the noisy imaginary time
+            process.
         """
         self.n_steps = n_steps
         self.p = p
