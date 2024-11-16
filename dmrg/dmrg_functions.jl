@@ -1,7 +1,7 @@
 
 """
-This code computes the ground state of an Ising spin ladder Hamiltonian
-using DMRG.
+This code computes the ground state and the gap of an Ising spin ladder
+Hamiltonian using DMRG.
 The DMRG-computed ground state is used to obtain the Binder cumulant and the
 fidelity of the mixed steady state of the noisy ITE process in the limit of
 infinitesimally small Trotter step.
@@ -421,4 +421,180 @@ function dmrg_fidelity(
 
     "Outputting the overlap between the two ground states."
     return abs(inner(psi_gs',psi))
+end
+
+function dmrg_gap(
+    N :: Int,
+    interaction_sign :: String,
+    g :: Float64,
+    lamX :: Float64,
+    lamY :: Float64,
+    lamZ :: Float64,
+    lamXX :: Float64,
+    lamYY :: Float64,
+    lamZZ :: Float64,
+    lamAD :: Float64,
+    nsweeps :: Int,
+    maxdim,
+    cutoff,
+    psi0_bonddim :: Int
+    weight :: Float64
+)
+    """
+    Computes gap between the ground and the first excited state of an Ising spin
+    ladder Hamiltonian using DMRG.
+
+    Parameters
+    ----------
+    N : Int
+        The total number of sites on the ladder.
+    interaction_sign : String
+        Interaction along the legs of the ladder.
+        Relevant options: FM or AFM
+    g : Float64
+        Transverse field.
+    lamX : Float64
+        XX-type interleg coupling (induced by X noise in the ITE).
+    lamY : Float64
+        YY-type interleg coupling (induced by Y noise in the ITE).
+    lamZ : Float64
+        ZZ-type interleg coupling (induced by Z noise in the ITE).
+    lamXX : Float64
+        XXXX-type plaquette interleg coupling (induced by XX noise in the ITE).
+    lamYY : Float64
+        YYYY-type plaquette interleg coupling (induced by YY noise in the ITE).
+    lamZZ : Float64
+        ZZZZ-type plaquette interleg coupling (induced by ZZ noise in the ITE).
+    lamAD : Float64
+        AD noise induced interleg coupling.
+    nsweeps : Int
+        The number of DMRG sweeps.
+    maxdim :
+        The maximum DMRG bod dimension.
+    cutoff :
+        DMRG cutoff.
+    psi0_bonddim : Int
+        Bond dimension of a random initial MPS in DMRG.
+    weight : Float64
+        Weight to multiply the overlap between the states when minimizing it
+        (see ITensor documentation).
+    """
+
+    sites = siteinds("S=1/2",N)
+
+    "Setting a spin ladder Hamiltonian MPO."
+    os = OpSum()
+    for j=1:2:N-2    # upper leg of the ladder
+        if interaction_sign=="FM"
+            os += -1,"Z",j,"Z",j+2
+        end
+        if interaction_sign=="AFM"
+            os += +1,"Z",j,"Z",j+2
+        end
+        os += g,"X",j
+    end
+    os += g,"X",N-1
+    for j=2:2:N-2    # lower leg of the ladder
+        if interaction_sign=="FM"
+            os += -1,"Z",j,"Z",j+2
+        end
+        if interaction_sign=="AFM"
+            os += +1,"Z",j,"Z",j+2
+        end
+        os += g,"X",j
+    end
+    os += g,"X",N
+    for j=1:2:N-1    # interleg coupling
+        os += -lamX,"X",j,"X",j+1
+        os += lamY,"Y",j,"Y",j+1
+        os += -lamZ,"Z",j,"Z",j+1
+    end
+    for j=1:2:N-3    # interleg coupling
+        os += -lamXX,"X",j,"X",j+1,"X",j+2,"X",j+3
+        os += -lamYY,"Y",j,"Y",j+1,"Y",j+2,"Y",j+3
+        os += -lamZZ,"Z",j,"Z",j+1,"Z",j+2,"Z",j+3
+    end
+    for j=1:N    # AD-noise induced term
+        os += -lamAD,"Z",j
+    end
+    for j=1:2:N-1    # AD-noise induced term
+        os += -lamAD,"X",j,"X",j+1
+        os += lamAD,"Y",j,"Y",j+1
+        os += -im*lamAD,"X",j,"Y",j+1
+        os += -im*lamAD,"Y",j,"X",j+1
+    end
+    H = MPO(os,sites)
+    """
+    In the symmetry-broken phase, the ground state is four-fold degenerate and
+    one needs to find the first five lowest energy states to calcualate the gap.
+    In the disordered phase, however, there is no ground state degeneracy.
+    Below the number of eignestates to be computed depends on which phase the
+    system is in; however, the phase boundary depends on the system size (here
+    given for N=800 which is close to the TD limit).
+    Alternatively, one can always compute the gap as the difference between the
+    fifth eigenstate and the grounds state since in the TD limit the continuum
+    level spacing vanishes.
+    """
+    if (lamX==0.0 && g<=1.0) || (lamX==0.1 && g<=0.937)
+        psi0_init = randomMPS(sites,psi0_bonddim)
+        psi1_init = randomMPS(sites,psi0_bonddim)
+        psi2_init = randomMPS(sites,psi0_bonddim)
+        psi3_init = randomMPS(sites,psi0_bonddim)
+        psi4_init = randomMPS(sites,psi0_bonddim)
+        if lamAD == 0.0
+            energy0, psi0 = dmrg(H,psi0_init;
+                            nsweeps, maxdim, cutoff, outputlevel=0)
+            energy1, psi1 = dmrg(H,[psi0],psi1_init;
+                            nsweeps,maxdim,cutoff, outputlevel=0, weight=weight)
+            energy2, psi2 = dmrg(H,[psi0,psi1],psi2_init;
+                            nsweeps,maxdim,cutoff, outputlevel=0, weight=weight)
+            energy3, psi3 = dmrg(H,[psi0,psi1,psi2],psi3_init;
+                            nsweeps,maxdim,cutoff, outputlevel=0, weight=weight)
+            energy4, psi4 = dmrg(H,[psi0,psi1,psi2,psi3],psi4_init;
+                            nsweeps,maxdim,cutoff, outputlevel=0, weight=weight)
+        else
+            energy0, psi0 = dmrg(H,psi0_init;
+                    nsweeps, maxdim, cutoff, outputlevel=0, ishermitian=false)
+            energy1, psi1 = dmrg(H,[psi0],psi1_init;
+                    nsweeps,maxdim,cutoff, outputlevel=0, weight=weight,
+                    ishermitian=false)
+            energy2, psi2 = dmrg(H,[psi0,psi1],psi2_init;
+                    nsweeps,maxdim,cutoff, outputlevel=0, weight=weight,
+                    ishermitian=false)
+            energy3, psi3 = dmrg(H,[psi0,psi1,psi2],psi3_init;
+                    nsweeps,maxdim,cutoff, outputlevel=0, weight=weight,
+                    ishermitian=false)
+            energy4, psi4 = dmrg(H,[psi0,psi1,psi2,psi3],psi4_init;
+                    nsweeps,maxdim,cutoff, outputlevel=0, weight=weight,
+                    ishermitian=false)
+        end
+        gap = max(
+                energy1-energy0,
+                energy2-energy0,
+                energy3-energy0,
+                energy4-energy0
+                )
+    end
+
+    if (lamX==0.0 && g>=1.0) || (lamX==0.1 && g>=0.937)
+        psi0_init = randomMPS(sites,psi0_bonddim)
+        psi1_init = randomMPS(sites,psi0_bonddim)
+        if lamAD == 0.0
+            energy0, psi0 = dmrg(H,psi0_init;
+                            nsweeps, maxdim, cutoff, outputlevel=0)
+            energy1, psi1 = dmrg(H,[psi0],psi1_init;
+                            nsweeps,maxdim,cutoff, outputlevel=0, weight=weight)
+        else
+            energy0, psi0 = dmrg(H,psi0_init;
+                            nsweeps, maxdim, cutoff, outputlevel=0,
+                            ishermitian=false)
+            energy1, psi1 = dmrg(H,[psi0],psi1_init;
+                            nsweeps,maxdim,cutoff, outputlevel=0, weight=weight,
+                            ishermitian=false)
+        end
+        gap = energy1-energy0
+    end
+
+    return gap
+
 end
