@@ -479,7 +479,6 @@ function dmrg_gap(
         Weight to multiply the overlap between the states when minimizing it
         (see ITensor documentation).
     """
-
     sites = siteinds("S=1/2",N)
 
     "Setting a spin ladder Hamiltonian MPO."
@@ -597,4 +596,198 @@ function dmrg_gap(
 
     return gap
 
+end
+
+
+
+
+function dmrg_correlation_function(
+    N :: Int,
+    interaction_sign :: String,
+    g :: Float64,
+    lamX :: Float64,
+    lamY :: Float64,
+    lamZ :: Float64,
+    lamXX :: Float64,
+    lamYY :: Float64,
+    lamZZ :: Float64,
+    lamAD :: Float64,
+    nsweeps :: Int,
+    maxdim,
+    cutoff,
+    psi0_bonddim :: Int
+)
+    """
+    Computes connected ZZ correlation function using DMRG.
+
+    Parameters
+    ----------
+    N : Int
+        The total number of sites on the ladder.
+    interaction_sign : String
+        Interaction along the legs of the ladder.
+        Relevant options: FM or AFM
+    g : Float64
+        Transverse field.
+    lamX : Float64
+        XX-type interleg coupling (induced by X noise in the ITE).
+    lamY : Float64
+        YY-type interleg coupling (induced by Y noise in the ITE).
+    lamZ : Float64
+        ZZ-type interleg coupling (induced by Z noise in the ITE).
+    lamXX : Float64
+        XXXX-type plaquette interleg coupling (induced by XX noise in the ITE).
+    lamYY : Float64
+        YYYY-type plaquette interleg coupling (induced by YY noise in the ITE).
+    lamZZ : Float64
+        ZZZZ-type plaquette interleg coupling (induced by ZZ noise in the ITE).
+    lamAD : Float64
+        AD noise induced interleg coupling.
+    nsweeps : Int
+        The number of DMRG sweeps.
+    maxdim :
+        The maximum DMRG bod dimension.
+    cutoff :
+        DMRG cutoff.
+    psi0_bonddim : Int
+        Bond dimension of a random initial MPS in DMRG.
+    """
+    sites = siteinds("S=1/2",N)
+
+    "Setting a spin ladder Hamiltonian MPO."
+    os = OpSum()
+    for j=1:2:N-2   # upper leg of the ladder
+        if interaction_sign=="FM"
+            os += -1,"Z",j,"Z",j+2
+        end
+        if interaction_sign=="AFM"
+            os += +1,"Z",j,"Z",j+2
+        end
+        os += g,"X",j
+    end
+    os += g,"X",N-1
+    for j=2:2:N-2   # lower leg of the ladder
+        if interaction_sign=="FM"
+            os += -1,"Z",j,"Z",j+2
+        end
+        if interaction_sign=="AFM"
+            os += +1,"Z",j,"Z",j+2
+        end
+        os += g,"X",j
+    end
+    os += g,"X",N
+    for j=1:2:N-1   # interleg coupling
+        os += -lamX,"X",j,"X",j+1
+        os += lamY,"Y",j,"Y",j+1
+        os += -lamZ,"Z",j,"Z",j+1
+    end
+    for j=1:2:N-3   # interleg coupling
+        os += -lamXX,"X",j,"X",j+1,"X",j+2,"X",j+3
+        os += -lamYY,"Y",j,"Y",j+1,"Y",j+2,"Y",j+3
+        os += -lamZZ,"Z",j,"Z",j+1,"Z",j+2,"Z",j+3
+    end
+    for j=1:N   # AD-noise induced term
+        os += -lamAD,"Z",j
+    end
+    for j=1:2:N-1   # AD-noise induced terms
+        os += -lamAD,"X",j,"X",j+1
+        os += lamAD,"Y",j,"Y",j+1
+        os += -im*lamAD,"X",j,"Y",j+1
+        os += -im*lamAD,"Y",j,"X",j+1
+    end
+    H = MPO(os, sites)
+
+    "Setting a sum_i Z_iZ_{i+1} MPO along the rungs of the ladder."
+    os_obs_t = OpSum()
+    for j=1:2:N-1
+        os_obs_t += "Z",j,"Z",j+1
+    end
+    obs_t = MPO(os_obs_t, sites)
+
+    """
+    DMRG routine computing the ground state of the spin ladder.
+    The routine is performed multiple times with a random initial state until
+    the convergence criteria are met or the maximum number of iterations is
+    reached.
+    This is needed because sometimes DMRG can converge to a state within the
+    ground state manifold that has a very small overlap with the |1>> state.
+    The small overlap can lead to numerical errors.
+    """
+    for i in 1:100
+        psi0 = randomMPS(sites, psi0_bonddim)
+        if lamAD == 0.0
+            energy_l, psi_l = dmrg(
+                H,psi0;
+                nsweeps,
+                maxdim,
+                cutoff,
+                outputlevel=0,
+                ishermitian=true
+            )
+        else
+            "The Hamiltonian is non-Hermitian if the AD noise is present."
+            energy_l, psi_l = dmrg(
+                H,psi0;
+                nsweeps,
+                maxdim,
+                cutoff,
+                outputlevel=0,
+                ishermitian=false
+            )
+        end
+        global energy = energy_l
+        global psi = psi_l
+        """
+        The first criterion ensures that the overlap between the ground state
+        and the |1>> state is nonzero, i.e. that DMRG converged to the correct
+        symmetry-broken state.
+        The second criterion is added for the case of a disordered ground state.
+        """
+        if (real(inner(psi_l',obs_t,psi_l)) > 0 ||
+            abs(real(inner(psi_l',obs_t,psi_l))) < 0.001)
+            break
+        end
+    end
+
+    "Setting an MPS for the |1>> state."
+    A = [1 0
+        0 1]
+    id_efd_mps = MPS(sites,"0")
+    for i in 1:div(N,2)
+        Bell_MPS = MPS(A,sites[2*i-1:2*i],maxdim=2)
+        id_efd_mps[2*i-1]=Bell_MPS[1]
+        id_efd_mps[2*i]=Bell_MPS[2]
+    end
+
+    """
+    Calculating connected ZZ correlation function over a range of distance given
+    the obtained ground state of the spin ladder.
+    The points at which the CF is computed are situated simmetrically with
+    respect to the center of the Ising ladder.
+    """
+    CF=[]
+    for i in 1:100
+        os_obs_CF = OpSum()
+
+        starts = 400-i
+        ends = 400+i
+
+        os_obs_CF += "Z",starts,"Z",ends
+        obs_CF = MPO(os_obs_CF,sites)
+
+        os_obs_CF1 = OpSum()
+        os_obs_CF1 += "Z",starts
+        obs_CF1 = MPO(os_obs_CF1,sites)
+
+        os_obs_CF2 = OpSum()
+        os_obs_CF2 += "Z",ends
+        obs_CF2 = MPO(os_obs_CF2,sites)
+
+        obs_CF_expectation = inner(id_efd_mps',obs_CF,psi)/inner(id_efd_mps,psi)
+        obs_CF1_expectation = inner(id_efd_mps',obs_CF1,psi)/inner(id_efd_mps,psi)
+        obs_CF2_expectation = inner(id_efd_mps',obs_CF2,psi)/inner(id_efd_mps,psi)
+
+        append!(CF, obs_CF_expectation - obs_CF1_expectation * obs_CF2_expectation)
+    end
+    return CF
 end
