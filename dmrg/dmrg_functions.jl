@@ -11,8 +11,9 @@ Reference: https://arxiv.org/abs/2406.04285.
 Packages information:
 ---------------------
 ITensors version = 0.3.57
-
+Julia version = 1.10.1
 """
+
 
 function dmrg_binder(
     N :: Int,
@@ -423,6 +424,7 @@ function dmrg_fidelity(
     return abs(inner(psi_gs',psi))
 end
 
+
 function dmrg_gap(
     N :: Int,
     interaction_sign :: String,
@@ -437,7 +439,7 @@ function dmrg_gap(
     nsweeps :: Int,
     maxdim,
     cutoff,
-    psi0_bonddim :: Int
+    psi0_bonddim :: Int,
     weight :: Float64
 )
     """
@@ -597,8 +599,6 @@ function dmrg_gap(
     return gap
 
 end
-
-
 
 
 function dmrg_correlation_function(
